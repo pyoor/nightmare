@@ -181,15 +181,13 @@ class CSamplesGenerator:
         where = "statistic_id = $id"
         total = self.db.update("statistics", total=row.total+1, iteration=row.iteration+1, where=where, vars=vars)
 
-  def queue_is_full(self, prefix, maximum):
-    tube_name = "%s-samples" % prefix
+  def queue_is_full(self, tube_name, maximum):
     q = get_queue(watch=True, name=tube_name)
     value = q.stats_tube(tube_name)["current-jobs-ready"]
     debug("Total of %d job(s) in queue" % value)
     return value > maximum-1
-  
-  def get_pending_elements(self, prefix, maximum):
-    tube_name = "%s-samples" % prefix
+
+  def get_pending_elements(self, tube_name, maximum):
     q = get_queue(watch=True, name=tube_name)
     value = q.stats_tube(tube_name)["current-jobs-ready"]
     debug("Total of %d job(s) in queue" % value)
@@ -359,10 +357,11 @@ class CSamplesGenerator:
 
       for pe in project_engines:
         tube_prefix = pe.tube_prefix
+        tube_name = "%s-samples" % tube_prefix
         maximum = pe.maximum_samples
-        if not self.queue_is_full(tube_prefix, maximum):
-          for i in range(self.get_pending_elements(tube_prefix, maximum)):
-            if self.queue_is_full(tube_prefix, maximum):
+        if not self.queue_is_full(tube_name, maximum):
+          for i in range(self.get_pending_elements(tube_name, maximum)):
+            if self.queue_is_full(tube_name, maximum):
               break
 
             line = "Creating sample for %s from folder %s for tube %s mutator %s"
