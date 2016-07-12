@@ -70,6 +70,7 @@ CREATE TABLE `crashes` (
   `total_samples` int(11) NOT NULL,
   `additional` mediumtext,
   `crash_hash` varchar(48),
+  `status` int(1) DEFAULT 0
   PRIMARY KEY (`crash_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=826 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -252,7 +253,12 @@ CREATE TABLE `triggers` (
 
 LOCK TABLES `config` WRITE;
 /*!40000 ALTER TABLE `config` DISABLE KEYS */;
-INSERT INTO `config` VALUES (7,'SAMPLES_PATH','/home/joxean/Documentos/research/nightmare/results',NULL,NULL),(8,'TEMPLATES_PATH','/home/joxean/Documentos/research/nightmare/samples',NULL,NULL),(9,'NIGHTMARE_PATH','/home/joxean/Documentos/research/nightmare',NULL,NULL),(10,'QUEUE_HOST','localhost',NULL,NULL),(11,'QUEUE_PORT','11300',NULL,NULL),(12,'TEMPORARY_PATH','/tmp/',NULL,NULL);
+INSERT INTO `config` VALUES
+    (1,'NIGHTMARE_PATH','/nightmare/',NULL,NULL),
+    (2,'WORKING_PATH','/nightmare/data/',NULL,NULL),
+    (3,'TEMPORARY_PATH','/tmp/',NULL,NULL),
+    (4,'QUEUE_HOST','localhost',NULL,NULL),
+    (5,'QUEUE_PORT','11300',NULL,NULL);
 /*!40000 ALTER TABLE `config` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;

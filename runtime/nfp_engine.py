@@ -92,10 +92,9 @@ class CSamplesGenerator:
     return res
 
   def read_random_file(self, folder):
-    basepath = os.path.join(self.config["TEMPLATES_PATH"], folder)
-    files = os.listdir(basepath)
+    files = os.listdir(folder)
     filename = random.choice(files)
-    return os.path.join(basepath, filename)
+    return os.path.join(folder, filename)
 
   def get_command(self, cmd, filename, subfolder):
     cmd = cmd.replace("%INPUT%", '"%s"' % filename)
@@ -108,16 +107,17 @@ class CSamplesGenerator:
     return cmd, temp_file
 
   def create_sample(self, pe):
-    subfolder = pe.subfolder
+    template_folder = os.path.join(self.config["WORKING_PATH"], pe.subfolder, "templates")
     tube_prefix = pe.tube_prefix
     command = pe.command
     project_id = pe.project_id
     mutation_engine_id = pe.mutation_engine_id
 
-    filename = self.read_random_file(subfolder)
+    filename = self.read_random_file(template_folder)
+    template_hash = os.path.basename(filename)
     debug("Random template file %s" % filename)
-    
-    cmd, temp_file = self.get_command(command, filename, subfolder)
+
+    cmd, temp_file = self.get_command(command, filename, template_folder)
     log("Generating mutated file %s" % temp_file)
     debug("*** Command: %s" % cmd)
     os.system(cmd)
@@ -127,8 +127,14 @@ class CSamplesGenerator:
       log("Putting it in queue and updating statistics...")
       buf = file(temp_file, "rb").read()
       q = get_queue(watch=False, name="%s-samples" % tube_prefix)
-      json_buf = json.dumps([base64.b64encode(buf), temp_file])
-      q.put(json_buf)
+
+      data = {
+        'sample': base64.b64encode(zlib.compress(buf)),
+        'temp_file': temp_file,
+        'template_hash': template_hash
+      }
+
+      q.put(json.dumps(data))
       self.update_statistics(project_id, mutation_engine_id)
       self.update_iteration(project_id)
     except:
@@ -211,16 +217,16 @@ class CSamplesGenerator:
         log("Error removing temporary file: %s" % str(sys.exc_info()[1]))
       job.delete()
 
-  def calculate_crash_hash(self, data):
+  def calculate_crash_hash(self, crash_info):
     crash_hash = []
-    if "additional" in data:
-      if "stack trace" in data["additional"]:
-        st = data["additional"]["stack trace"]
+    if "additional" in crash_info:
+      if "stack trace" in crash_info["additional"]:
+        st = crash_info["additional"]["stack trace"]
         last = max(map(int, st.keys()))
 
         # First element in the crash hash contains the last 3 nibbles
         # of the $PC.
-        tmp = hex(data["pc"])
+        tmp = hex(crash_info["pc"])
         crash_hash = [tmp[len(tmp)-3:]]
 
         # Next elements, will be the last 3 nibbles of each address in
@@ -259,17 +265,21 @@ class CSamplesGenerator:
       return False
     return True
 
-  def insert_crash(self, project_id, temp_file, data):
-    has_file = "has_file" in data
-    crash_path = os.path.join(self.config["SAMPLES_PATH"], "crashes")
-    if not os.path.exists(temp_file) and not has_file:
+  def insert_crash(self, project_id, subfolder, d):
+    samples_path = os.path.join(self.config["WORKING_PATH"], subfolder, "samples")
+    temp_file = d['temp_file']
+    crash_info = d['crash_info']
+    template_hash = d['template_hash']
+    data = d['data']
+
+    if data is None and not os.path.exists(temp_file):
       log("Test case file %s does not exists!!!!" % temp_file)
       return False
-    elif has_file:
+    elif data is not None:
       # There is no file path but, rather, a whole zlib compressed file
       # encoded in base64 so, create a temporary file and write to it
       # the decoded base64 and decompressed zlib stream of data.
-      buf = temp_file
+      buf = data
       temp_file = tempfile.mktemp(dir=self.config["TEMPORARY_PATH"])
 
       try:
@@ -279,11 +289,12 @@ class CSamplesGenerator:
         os.remove(temp_file)
         raise
 
-    buf = open(temp_file, "rb").read()
-    file_hash = sha1(buf).hexdigest()
-    new_path = os.path.join(crash_path, file_hash)
+    with open(temp_file, "rb") as f:
+      buf = f.read()
 
-    sample_id = self.db.insert("samples", sample_hash=file_hash)
+    file_hash = sha1(buf).hexdigest()
+    new_path = os.path.join(samples_path, file_hash)
+    sample_id = self.db.insert("samples", sample_hash=file_hash, template_hash=template_hash)
 
     what = "count(*) cnt"
     vars = {"id":project_id}
@@ -292,35 +303,39 @@ class CSamplesGenerator:
     row = res[0]
     total = row.cnt
 
-    crash_hash = self.calculate_crash_hash(data)
-    store_crash = self.should_store_crash(project_id, crash_hash) or data["exploitable"] == "EXPLOITABLE"
+    crash_hash = self.calculate_crash_hash(crash_info)
+    store_crash = self.should_store_crash(project_id, crash_hash)
 
     if store_crash:
       log("Saving test file %s" % new_path)
-      shutil.move(temp_file, new_path)
+      shutil.copy(temp_file, new_path)
 
       if os.path.exists(temp_file + ".diff"):
-        shutil.move(temp_file + ".diff", new_path + ".diff")
+        shutil.copy(temp_file + ".diff", new_path + ".diff")
 
     with self.db.transaction():
-      log("Inserting crash $PC 0x%08x Signal %s Exploitability %s Hash %s" % (data["pc"], data["signal"], data["exploitable"], crash_hash))
-      if data["disasm"] is not None:
-        disasm = "%08x %s" % (data["disasm"][0], data["disasm"][1])
+      log("Inserting crash $PC 0x%08x Signal %s Exploitability %s Hash %s" %
+          (crash_info["pc"], crash_info["signal"], crash_info["exploitable"], crash_hash))
+      if crash_info["disasm"] is not None:
+        disasm = "%08x %s" % (crash_info["disasm"][0], crash_info["disasm"][1])
       else:
         disasm = "None"
 
-      additional_info = json.dumps(data["additional"])
+      additional_info = json.dumps(crash_info["additional"])
       if store_crash:
         self.db.insert("crashes", project_id=project_id, sample_id=sample_id,
-                       program_counter=data["pc"], crash_signal=data["signal"],
-                       exploitability=data["exploitable"],
-                       disassembly=disasm, total_samples=total, 
-                       additional = str(additional_info),
-                       crash_hash = crash_hash)
+                       program_counter=crash_info["pc"], crash_signal=crash_info["signal"],
+                       exploitability=crash_info["exploitable"],
+                       disassembly=disasm, total_samples=total,
+                       additional=str(additional_info),
+                       crash_hash=crash_hash, status=0)
         log("Crash stored")
       else:
         log("Ignoring and removing already existing crash with hash %s" % crash_hash)
-        os.remove(temp_file)
+        if os.path.isfile(temp_file):
+          os.remove(temp_file)
+        if os.path.isfile(temp_file + ".diff"):
+          os.remove(temp_file + ".diff")
 
       self.reset_iteration(project_id)
 
@@ -329,8 +344,29 @@ class CSamplesGenerator:
     where = "project_id = $project_id and mutation_engine_id = -1"
     self.db.update("statistics", iteration=0, where=where, vars=vars)
 
+  def add_templates(self):
+    what = "project_id, name, subfolder"
+    res = self.db.select("projects", what=what, where="enabled = 1")
+
+    for row in res:
+      project_folder = os.path.join(self.config["WORKING_PATH"], row['subfolder'])
+      input_folder = os.path.join(project_folder, "input")
+
+      for i in os.listdir(input_folder):
+        i_file = os.path.join(input_folder, i)
+        with open(i_file, "rb") as f:
+          buf = f.read()
+        file_hash = sha1(buf).hexdigest()
+        template = os.path.join(project_folder, "templates", file_hash)
+
+        if not os.path.isfile(template):
+          log("Adding sample %s to project %s" % (file_hash, row['name']))
+          os.rename(i_file, template)
+        else:
+          os.remove(i_file)
+
   def find_crashes(self):
-    what = "project_id, tube_prefix"
+    what = "project_id, subfolder, tube_prefix"
     res = self.db.select("projects", what=what, where="enabled = 1")
     
     for row in res:
@@ -338,15 +374,15 @@ class CSamplesGenerator:
       q = get_queue(watch=True, name=tube_name)
       while q.stats_tube(tube_name)["current-jobs-ready"] > 0:
         job = q.reserve()
-        crash_info = json.loads(job.body)
-        temp_file = crash_info.keys()[0]
-        crash_data = crash_info.values()[0]
-        self.insert_crash(row.project_id, temp_file, crash_data)
+        d = json.loads(job.body)
+        self.insert_crash(row.project_id, row.subfolder, d)
         job.delete()
 
   def generate(self):
     log("Starting generator...")
     while 1:
+      debug("Add templates...")
+      self.add_templates()
       debug("Finding crashes...")
       self.find_crashes()
       debug("Checking files to remove...")

@@ -10,7 +10,7 @@ import os
 import sys
 import web
 import json
-
+import shutil
 
 from hashlib import sha1
 from zipfile import ZipFile
@@ -135,29 +135,19 @@ class config:
       f = register_form()
       return render.login(f)
     
-    i = web.input(samples_path="", templates_path="", nightmare_path="", \
-                  temporary_path="")
-    if i.samples_path == "" or i.templates_path == "" or \
-       i.nightmare_path == "" or i.temporary_path == "":
+    i = web.input(working_path="", nightmare_path="", temporary_path="")
+    if i.working_path == "" or i.nightmare_path == "" or i.temporary_path == "":
       render.error("Invalid samples, templates, temporary or nightmare path")
     
     db = init_web_db()
     with db.transaction():
-      sql = "select 1 from config where name = 'SAMPLES_PATH'"
+      sql = "select 1 from config where name = 'WORKING_PATH'"
       res = list(db.query(sql))
       if len(res) > 0:
-        sql = "update config set value = $value where name = 'SAMPLES_PATH'"
+        sql = "update config set value = $value where name = 'WORKING_PATH'"
       else:
-        sql = "insert into config (name, value) values ('SAMPLES_PATH', $value)"
-      db.query(sql, vars={"value":i.samples_path})
-
-      sql = "select 1 from config where name = 'TEMPLATES_PATH'"
-      res = list(db.query(sql))
-      if len(res) > 0:
-        sql = "update config set value = $value where name = 'TEMPLATES_PATH'"
-      else:
-        sql = "insert into config (name, value) values ('TEMPLATES_PATH', $value)"
-      db.query(sql, vars={"value":i.templates_path})
+        sql = "insert into config (name, value) values ('WORKING_PATH', $value)"
+      db.query(sql, vars={"value":i.working_path})
       
       sql = "select 1 from config where name = 'NIGHTMARE_PATH'"
       res = list(db.query(sql))
@@ -201,22 +191,18 @@ class config:
     db = init_web_db()
     sql = """select name, value
                from config
-              where name in ('SAMPLES_PATH', 'TEMPLATES_PATH', 'NIGHTMARE_PATH',
-                             'TEMPORARY_PATH', 'QUEUE_HOST', 'QUEUE_PORT')"""
+               where name in ('WORKING_PATH', 'NIGHTMARE_PATH', 'TEMPORARY_PATH', 'QUEUE_HOST', 'QUEUE_PORT')"""
     res = db.query(sql)
 
-    samples_path = ""
-    templates_path = ""
+    working_path = ""
     nightmare_path = ""
     temporary_path = ""
     queue_host = "localhost"
     queue_port = 11300
     for row in res:
       name, value = row.name, row.value
-      if name == 'SAMPLES_PATH':
-        samples_path = value
-      elif name == 'TEMPLATES_PATH':
-        templates_path = value
+      if name == 'WORKING_PATH':
+        working_path = value
       elif name == 'NIGHTMARE_PATH':
         nightmare_path = value
       elif name == 'TEMPORARY_PATH':
@@ -226,8 +212,7 @@ class config:
       elif name == 'QUEUE_PORT':
         queue_port = value
 
-    return render.config(samples_path, templates_path, temporary_path,
-                         nightmare_path, queue_host, queue_port)
+    return render.config(working_path, nightmare_path, temporary_path, queue_host, queue_port)
 
 #-----------------------------------------------------------------------
 class users:
@@ -273,6 +258,11 @@ class add_project:
       ignore_duplicates = 0
 
     db = init_web_db()
+    sql = """select value from config where name in ('WORKING_PATH')"""
+    res = db.query(sql)
+    res = list(res)
+    working_path = res[0]['value']
+
     with db.transaction():
       db.insert("projects", name=i.name, description=i.description,
               subfolder=i.subfolder, tube_prefix=i.tube_prefix, 
@@ -280,6 +270,19 @@ class add_project:
               maximum_iteration=i.max_iteration,
               date=web.SQLLiteral("CURRENT_DATE"),
               ignore_duplicates=ignore_duplicates)
+
+    project_folder = os.path.join(working_path, i.subfolder)
+    if not os.path.exists(project_folder):
+      os.makedirs(project_folder)
+
+    if not os.path.exists(os.path.join(project_folder, "samples")):
+      os.makedirs(os.path.join(project_folder, "samples"))
+
+    if not os.path.exists(os.path.join(project_folder, "templates")):
+      os.makedirs(os.path.join(project_folder, "templates"))
+
+    if not os.path.exists(os.path.join(project_folder, "input")):
+      os.makedirs(os.path.join(project_folder, "input"))
 
     return web.redirect("/projects")
 
@@ -317,6 +320,34 @@ class edit_project:
       ignore_duplicates = 0
 
     db = init_web_db()
+
+    sql = """select value from config where name in ('WORKING_PATH')"""
+    res = db.query(sql)
+    res = list(res)
+    working_path = res[0]['value']
+
+    what = """project_id, name, description, subfolder, tube_prefix,
+              maximum_samples, enabled, date, archived,
+              maximum_iteration, ignore_duplicates """
+    where = "project_id = $project_id"
+    vars = {"project_id":i.id}
+    res = db.select("projects", what=what, where=where, vars=vars)
+    res = list(res)
+
+    old_path = os.path.join(working_path, res[0]['subfolder'])
+    new_path = os.path.join(working_path, i.subfolder)
+    print old_path, new_path
+    if os.path.isfile(old_path) and old_path != new_path:
+      shutil.move(old_path, new_path)
+    elif old_path != new_path:
+      os.makedirs(new_path)
+      os.makedirs(os.path.join(new_path, "samples"))
+      os.makedirs(os.path.join(new_path, "templates"))
+      os.makedirs(os.path.join(new_path, "input"))
+
+    if len(res) == 0:
+      return render.error("Invalid project identifier")
+
     with db.transaction():
       enabled = i.enabled == "on"
       archived = i.archived == "on"
@@ -362,6 +393,22 @@ class del_project:
       return render.error("You must check the \"I'm sure\" field.")
     
     db = init_web_db()
+
+    sql = """select value from config where name in ('WORKING_PATH')"""
+    res = db.query(sql)
+    res = list(res)
+    working_path = res[0]['value']
+
+    what = """project_id, name, description, subfolder, tube_prefix,
+              maximum_samples, enabled, date, archived,
+              maximum_iteration, ignore_duplicates """
+    where = "project_id = $project_id"
+    vars = {"project_id":i.id}
+    res = db.select("projects", what=what, where=where, vars=vars)
+    res = list(res)
+
+    shutil.rmtree(os.path.join(working_path, res[0]['subfolder']))
+
     with db.transaction():
       vars={"project_id":i.id}
       where = "project_id=$project_id"
@@ -632,9 +679,9 @@ class results:
       if i.no_field not in valid_fields:
         return render.error("Invalid field %s" % i.no_field)
     
-      sql += " ORDER BY c.%s DESC" % (i.sortValue)
+      sql += " ORDER BY %s DESC" % (i.sortValue)
     else:
-      sql += " ORDER BY c.date DESC"
+      sql += " ORDER BY date DESC"
       
     res = db.query(sql)
     results = {}
@@ -783,26 +830,31 @@ class download_sample:
       is_diff = False
 
     db = init_web_db()
-    what = "sample_hash"
-    where = "sample_id = $id"
-    vars = {"id":i.id}
-    res = db.select("samples", what=what, where=where, vars=vars)
+    print i.id
+    res = db.query("""SELECT t1.sample_hash,
+                             t3.subfolder
+                      FROM samples t1
+                           JOIN crashes t2
+                             ON t1.sample_id = t2.sample_id
+                           JOIN projects t3
+                             ON t3.project_id = t2.project_id
+                      WHERE t1.sample_id = %s""", (i.id,))
     res = list(res)
     if len(res) == 0:
       return render.error("Invalid crash identifier")
     row = res[0]
     sample_hash = row.sample_hash
+    subfolder = row.subfolder
 
-    res = db.select("config", what="value", where="name='SAMPLES_PATH'")
+    res = db.select("config", what="value", where="name='WORKING_PATH'")
     res = list(res)
     if len(res) == 0:
-      return render.error("Invalid configuration value for 'SAMPLES_PATH'")
-    row = res[0]
+      return render.error("Invalid configuration value for 'WORKING_PATH'")
+    working_path = res[0].value
 
-    path = os.path.join(row.value, "crashes")
-    path = os.path.join(path, sample_hash)
+    path = os.path.join(working_path, subfolder, "samples", sample_hash)
     if not os.path.exists(path):
-      return render.error("Crash sample does not exists! %s" % path)
+      return render.error("Crash sample does not exist! %s" % path)
 
     if is_diff:
       if not os.path.exists(path + ".diff"):
@@ -947,7 +999,7 @@ class find_samples:
 
 #-----------------------------------------------------------------------
 def find_original_file(db, id):
-  
+  # ToDo - Currently broken.  Correct this to handle project folder.
   vars = {"id":id}
   where = "sample_id = $id"
   res = db.select("samples", what="sample_hash", where=where, vars=vars)
@@ -956,10 +1008,10 @@ def find_original_file(db, id):
     raise Exception("Invalid crash identifier")
   sample_hash = res[0].sample_hash
 
-  res = db.select("config", what="value", where="name='SAMPLES_PATH'")
+  res = db.select("config", what="value", where="name='WORKING_PATH'")
   res = list(res)
   if len(res) == 0:
-    raise Exception("Invalid configuration value for 'SAMPLES_PATH'")
+    raise Exception("Invalid configuration value for 'WORKING_PATH'")
 
   path = os.path.join(res[0].value, "crashes")
   path = os.path.join(path, sample_hash)
@@ -1100,12 +1152,12 @@ def get_sample_files(db, i, crash_id):
   row = res[0]
   sample_hash = row.sample_hash
 
-  res = db.select("config", what="value", where="name = 'SAMPLES_PATH'")
+  res = db.select("config", what="value", where="name = 'WORKING_PATH'")
   res = list(res)
   if len(res) == 0:
-    return render.error("Invalid configuration value for 'SAMPLES_PATH'")
+    return render.error("Invalid configuration value for 'WORKING_PATH'")
   
-  path = os.path.join(res[0].value, "crashes")
+  path = os.path.join(res[0].value, "samples")
   path = os.path.join(path, sample_hash)
   print path
   if not os.path.exists(path):

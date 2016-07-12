@@ -1,4 +1,4 @@
-$def with (samples_path, templates_path, temporary_path, nightmare_path, queue_host, queue_port)
+$def with (working_path, nightmare_path, temporary_path, queue_host, queue_port)
 <html>
 <head>
 <link href="/static/nightmare.css" rel="stylesheet" type="text/css">
@@ -31,14 +31,9 @@ $def with (samples_path, templates_path, temporary_path, nightmare_path, queue_h
   <form action="/config" method="POST">
   <table>
     <tr>
-      <td>Samples path:</td>
-      <td><input type="text" name="samples_path" value="$samples_path" size="50"/></td>
+      <td>Working path:</td>
+      <td><input type="text" name="working_path" value="$working_path" size="50"/></td>
       <td><i>Path where all the crashing samples will be stored for later analysis.</i></td>
-    </tr>
-    <tr>
-      <td>Templates path:</td>
-      <td><input type="text" name="templates_path" value="$templates_path" size="50"/></td>
-      <td><i>Path where template files, packets, etc... will be read from.</i></td>
     </tr>
     <tr>
       <td>Temporary path:</td>

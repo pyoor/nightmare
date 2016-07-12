@@ -11,6 +11,7 @@ import sys
 import json
 import base64
 import tempfile
+import zlib
 import ConfigParser
 
 from multiprocessing import Process, cpu_count
@@ -75,7 +76,6 @@ class CGenericFuzzer:
     try:
       self.tube_name = parser.get(self.section, 'tube')
     except:
-      raise
       raise Exception("No tube specified in the configuration file for section %s" % self.section)
 
     try:
@@ -198,7 +198,7 @@ class CGenericFuzzer:
       os.system(self.pre_command)
 
     crash = None
-    for i in range(0,3):
+    for i in range(0, 3):
       try:
         crash = self.launch_debugger(self.timeout, self.command, filename)
         break
@@ -222,14 +222,23 @@ class CGenericFuzzer:
       value = self.q.stats_tube(self.tube_name)["current-jobs-ready"]
       debug("Total of %d job(s) in queue" % value)
       job = self.q.reserve()
-      buf, temp_file = json.loads(job.body)
-      buf = base64.b64decode(buf)
+      d = json.loads(job.body)
+      sample = zlib.decompress(base64.b64decode(d['sample']))
+      temp_file = d['temp_file']
+      template_hash = d['template_hash']
 
       debug("Launching sample %s..." % os.path.basename(temp_file))
-      if self.launch_sample(buf):
+      if self.launch_sample(sample):
         log("We have a crash, moving to %s queue..." % self.crash_tube)
         crash = self.crash_info
-        d = {temp_file:self.crash_info}
+
+        d = {
+          "temp_file": temp_file,
+          "crash_info": crash,
+          "template_hash": template_hash,
+          "data": None
+        }
+
         self.crash_q.put(json.dumps(d))
         self.crash_info = None
 
