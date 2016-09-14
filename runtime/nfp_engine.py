@@ -52,8 +52,8 @@ class CSamplesGenerator:
       log("Configuration value %s is %s" % (row.name, row.value))
 
     # Create the corresponding directory if it doesn't exists
-    if not os.path.exists(self.config["SAMPLES_PATH"]):
-      os.makedirs(self.config["SAMPLES_PATH"])
+    if not os.path.exists(self.config["WORKING_PATH"]):
+      os.makedirs(self.config["WORKING_PATH"])
 
     # In Linux, it's recommended to use /dev/shm for speed improvements
     if not "TEMPORARY_PATH" in self.config:
