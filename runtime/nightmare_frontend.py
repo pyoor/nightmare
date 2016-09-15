@@ -654,7 +654,7 @@ class results:
                    and p.enabled = 1 """
 
     valid_fields = ["crash_signal", "program_counter", "exploitability", 
-                    "disassembly", "date"]
+                    "disassembly", "date", "crash_hash"]
     if i.field != "" and i.fieldValue != "":
       if i.field not in valid_fields:
         return render.error("Invalid field %s" % i.field)

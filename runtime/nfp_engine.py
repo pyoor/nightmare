@@ -116,7 +116,6 @@ class CSamplesGenerator:
     filename = self.read_random_file(template_folder)
     template_hash = os.path.basename(filename)
     debug("Random template file %s" % filename)
-
     cmd, temp_file = self.get_command(command, filename, template_folder)
     log("Generating mutated file %s" % temp_file)
     debug("*** Command: %s" % cmd)
@@ -144,6 +143,7 @@ class CSamplesGenerator:
         os.remove(temp_file)
       except:
         pass
+
       if os.path.exists("%s.diff" % temp_file):
         log("Removing temporary diff file %s" % temp_file)
         os.remove("%s.diff" % temp_file)
